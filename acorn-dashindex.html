@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Acorn Dash</title>
+
+    <style>
+        .cloud {
+            position: absolute;
+            font-size: 50px;
+            opacity: 0.8;
+            /* FIX: This allows clicks to pass through the clouds to the buttons */
+            pointer-events: none;
+        }
+
+        /* cloud positions */
+        .cloud1 { top: 40px; left: -100px; animation: cloudMove 40s linear infinite; }
+        .cloud2 { top: 120px; left: -200px; animation: cloudMove 55s linear infinite; }
+        .cloud3 { top: 200px; left: -300px; animation: cloudMove 70s linear infinite; }
+
+        @keyframes cloudMove {
+            from { left: -200px; }
+            to { left: 800px; }
+        }
+
+        body {
+            text-align: center;
+            font-family: Arial;
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            background: #87CEEB;
+        }
+
+        #menu {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            background-image: repeating-linear-gradient(90deg, #6ec6ff 0px, #6ec6ff 100px, #87CEEB 100px, #87CEEB 200px);
+            animation: scrollBackground 20s linear infinite;
+        }
+
+        button {
+            padding: 12px 25px;
+            font-size: 18px;
+            margin: 10px;
+            cursor: pointer;
+            border: none;
+            border-radius: 6px;
+            background: #4caf50;
+            color: white;
+            transition: transform 0.1s;
+        }
+
+        button:hover { background: #388e3c; transform: scale(1.05); }
+        
+        /* Visual feedback for selected difficulty */
+        .selected-btn { background: #2e7d32; border: 3px solid gold; }
+
+        @keyframes scrollBackground {
+            from { background-position: 0 0; }
+            to { background-position: 1000px 0; }
+        }
+
+        #game {
+            width: 700px;
+            height: 450px;
+            background: linear-gradient(#7ec850, #4caf50);
+            margin: auto;
+            border: 4px solid black;
+            position: relative;
+            overflow: hidden;
+            display: none;
+        }
+
+        .character { position: absolute; font-size: 40px; transition: left 0.1s, top 0.1s; }
+        #acorn { font-size: 30px; animation: sparkle 1s infinite alternate; }
+
+        @keyframes sparkle {
+            from { transform: scale(1); }
+            to { transform: scale(1.2); }
+        }
+
+        #message { position: absolute; top: 40%; width: 100%; font-size: 40px; color: white; font-weight: bold; display: none; text-shadow: 2px 2px 4px black; }
+        #gameButtons { position: absolute; top: 60%; width: 100%; display: none; }
+        #newHigh { color: yellow; font-size: 26px; display: none; text-shadow: 1px 1px 2px black; }
+    </style>
+</head>
+
+<body>
+
+    <div id="menu">
+        <h1>🐿 Acorn Dash</h1>
+        <h2>Select Game Mode</h2>
+        <button onclick="startGame(20)">20 Second Mode</button>
+        <button onclick="startGame(50)">50 Second Mode</button>
+        <button onclick="startGame(0)">Endless Mode</button>
+
+        <h2>Difficulty</h2>
+        <button id="easyBtn" onclick="setDifficulty('easy')">Easy</button>
+        <button id="mediumBtn" class="selected-btn" onclick="setDifficulty('medium')">Medium</button>
+        <button id="hardBtn" onclick="setDifficulty('hard')">Hard</button>
+
+        <h3>🏆 High Score: <span id="highscore">0</span></h3>
+        <p>Use <b>Arrow Keys</b> or <b>WASD</b> to move.<br>Press <b>P</b> to Pause.</p>
+    </div>
+
+    <div id="game">
+        <div class="cloud cloud1">☁️</div>
+        <div class="cloud cloud2">☁️</div>
+        <div class="cloud cloud3">☁️</div>
+        <h3>
+            Score: <span id="score">0</span> |
+            Lives: <span id="lives">3</span> |
+            Time: <span id="time">0</span>
+        </h3>
+
+        <div id="message"></div>
+        <div id="newHigh">⭐ NEW HIGH SCORE! ⭐</div>
+        <div id="gameButtons"></div>
+
+        <div id="player" class="character">🐿</div>
+        <div id="acorn" class="character">🌰</div>
+        <div id="goldenAcorn" class="character" style="display:none;">✨🌰</div>
+        <div id="enemy1" class="character">🦝</div>
+        <div id="enemy2" class="character">🦉</div>
+    </div>
+
+    <script>
+        /* SOUNDS */
+        let pickupSound = new Audio("https://assets.mixkit.co/sfx/preview/mixkit-coin-win-notification-1992.mp3");
+        let gameOverSound = new Audio("https://assets.mixkit.co/sfx/preview/mixkit-arcade-retro-game-over-213.mp3");
+
+        /* VARIABLES */
+        let player = document.getElementById("player");
+        let acorn = document.getElementById("acorn");
+        let enemy1 = document.getElementById("enemy1");
+        let enemy2 = document.getElementById("enemy2");
+        let goldenAcorn = document.getElementById("goldenAcorn");
+        let scoreText = document.getElementById("score");
+        let livesText = document.getElementById("lives");
+        let timeText = document.getElementById("time");
+        let message = document.getElementById("message");
+        let newHigh = document.getElementById("newHigh");
+        let gameButtons = document.getElementById("gameButtons");
+        let highScoreDisplay = document.getElementById("highscore");
+
+        let x = 50, y = 50, score = 0, lives = 3, enemySpeed = 3;
+        let gameActive = false, paused = false, time = 0, endless = false;
+        let difficultyMultiplier = 1;
+
+        /* HIGH SCORE */
+        let highScore = localStorage.getItem("acornHighScore") || 0;
+        highScoreDisplay.innerText = highScore;
+
+        /* DIFFICULTY */
+        function setDifficulty(level) {
+            // Remove selection from all buttons
+            document.getElementById("easyBtn").classList.remove("selected-btn");
+            document.getElementById("mediumBtn").classList.remove("selected-btn");
+            document.getElementById("hardBtn").classList.remove("selected-btn");
+
+            if (level == "easy") { difficultyMultiplier = 0.7; document.getElementById("easyBtn").classList.add("selected-btn"); }
+            if (level == "medium") { difficultyMultiplier = 1; document.getElementById("mediumBtn").classList.add("selected-btn"); }
+            if (level == "hard") { difficultyMultiplier = 1.5; document.getElementById("hardBtn").classList.add("selected-btn"); }
+        }
+
+        function togglePause() {
+            if (!gameActive) return;
+            paused = !paused;
+            message.innerText = paused ? "⏸ PAUSED" : "";
+            message.style.display = paused ? "block" : "none";
+        }
+
+        /* START GAME */
+        function startGame(timer) {
+            document.getElementById("menu").style.display = "none";
+            document.getElementById("game").style.display = "block";
+
+            score = 0; lives = 3; 
+            enemySpeed = 3 * difficultyMultiplier; // Apply difficulty at start
+
+            scoreText.innerText = score;
+            livesText.innerText = lives;
+
+            x = 50; y = 50;
+            player.style.left = x + "px";
+            player.style.top = y + "px";
+
+            acorn.style.left = "200px"; acorn.style.top = "200px";
+            enemy1.style.left = "500px"; enemy1.style.top = "200px";
+            enemy2.style.left = "0px"; enemy2.style.top = "100px";
+
+            message.style.display = "none";
+            gameButtons.style.display = "none";
+            newHigh.style.display = "none";
+
+            if (timer == 0) {
+                endless = true;
+                timeText.innerText = "∞";
+            } else {
+                endless = false;
+                time = timer;
+                timeText.innerText = time;
+            }
+            gameActive = true;
+        }
+
+        function goHome() {
+            gameActive = false;
+            document.getElementById("game").style.display = "none";
+            document.getElementById("menu").style.display = "block";
+        }
+
+        /* MOVEMENT (Arrow Keys + WASD) */
+        document.addEventListener("keydown", function (e) {
+            if (e.key.toLowerCase() == "p") { togglePause(); return; }
+            move(e);
+        });
+
+        function move(e) {
+            if (!gameActive || paused) return;
+
+            let key = e.key.toLowerCase();
+            if (key == "arrowright" || key == "d") { x += 15; }
+            if (key == "arrowleft" || key == "a") { x -= 15; }
+            if (key == "arrowup" || key == "w") { y -= 15; }
+            if (key == "arrowdown" || key == "s") { y += 15; }
+
+            // Boundary checks (keep squirrel inside the box)
+            if(x < 0) x = 0; if(x > 660) x = 660;
+            if(y < 0) y = 0; if(y > 410) y = 410;
+
+            player.style.left = x + "px";
+            player.style.top = y + "px";
+
+            checkAcorn();
+            checkEnemy();
+        }
+
+        /* ACORN LOGIC */
+        function checkAcorn() {
+            let px = player.offsetLeft;
+            let py = player.offsetTop;
+            let ax = acorn.offsetLeft;
+            let ay = acorn.offsetTop;
+
+            // Golden Acorn Logic
+            if (goldenAcorn.style.display == "block") {
+                let gx = goldenAcorn.offsetLeft;
+                let gy = goldenAcorn.offsetTop;
+                if (Math.abs(px - gx) < 30 && Math.abs(py - gy) < 30) {
+                    score += 5;
+                    scoreText.innerText = score;
+                    goldenAcorn.style.display = "none";
+                    pickupSound.play();
+                }
+            }
+
+            // Normal Acorn Logic
+            if (Math.abs(px - ax) < 30 && Math.abs(py - ay) < 30) {
+                pickupSound.play();
+                score++;
+                scoreText.innerText = score;
+
+                acorn.style.left = Math.random() * 650 + "px";
+                acorn.style.top = Math.random() * 400 + "px";
+
+                enemySpeed = (3 + score * 0.3) * difficultyMultiplier;
+
+                if (score > highScore) {
+                    highScore = score;
+                    localStorage.setItem("acornHighScore", highScore);
+                    highScoreDisplay.innerText = highScore;
+                    newHigh.style.display = "block";
+                }
+            }
+        }
+
+        /* ENEMY HIT */
+        function checkEnemy() {
+            let px = player.offsetLeft;
+            let py = player.offsetTop;
+            let enemies = [enemy1, enemy2];
+
+            enemies.forEach(en => {
+                if (Math.abs(px - en.offsetLeft) < 35 && Math.abs(py - en.offsetTop) < 35) {
+                    lives--;
+                    livesText.innerText = lives;
+                    x = 50; y = 50;
+                    player.style.left = x + "px";
+                    player.style.top = y + "px";
+
+                    if (lives <= 0) {
+                        gameOverSound.play();
+                        gameActive = false;
+                        message.innerText = "💀 GAME OVER";
+                        message.style.display = "block";
+                        gameButtons.innerHTML = '<button onclick="goHome()">Home</button>';
+                        gameButtons.style.display = "block";
+                    }
+                }
+            });
+        }
+
+        /* ENEMY AI */
+        setInterval(function() {
+            if (!gameActive || paused) return;
+            // Enemy 1: Chaser
+            let ex1 = enemy1.offsetLeft, ey1 = enemy1.offsetTop;
+            if (ex1 > x) ex1 -= enemySpeed; else ex1 += enemySpeed;
+            if (ey1 > y) ey1 -= enemySpeed; else ey1 += enemySpeed;
+            enemy1.style.left = ex1 + "px"; enemy1.style.top = ey1 + "px";
+        }, 100);
+
+        let owlX = 0;
+        setInterval(function() {
+            if (!gameActive || paused) return;
+            // Enemy 2: Patroller
+            owlX += (6 * difficultyMultiplier);
+            if (owlX > 700) owlX = -50;
+            enemy2.style.left = owlX + "px";
+        }, 80);
+
+        /* TIMER */
+        setInterval(function() {
+            if (!gameActive || paused || endless) return;
+            time--;
+            timeText.innerText = time;
+            if (time <= 0) {
+                gameOverSound.play();
+                gameActive = false;
+                message.innerText = "⏰ TIME UP";
+                message.style.display = "block";
+                gameButtons.innerHTML = '<button onclick="goHome()">Home</button>';
+                gameButtons.style.display = "block";
+            }
+        }, 1000);
+    </script>
+
+</body>
+</html>
